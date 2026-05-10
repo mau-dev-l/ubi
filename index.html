@@ -1,0 +1,390 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>Geolocalización en Tiempo Real</title>
+
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css" />
+
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: #0f1117;
+      color: #fff;
+      height: 100dvh;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    #map {
+      flex: 1;
+      width: 100%;
+      z-index: 1;
+    }
+
+    /* Panel inferior */
+    #panel {
+      background: #1a1d27;
+      border-top: 1px solid rgba(255,255,255,0.08);
+      padding: 14px 16px 20px;
+      z-index: 1000;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    #coords-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+    }
+
+    .stat-card {
+      background: rgba(255,255,255,0.06);
+      border: 0.5px solid rgba(255,255,255,0.1);
+      border-radius: 10px;
+      padding: 10px 12px;
+    }
+
+    .stat-label {
+      font-size: 11px;
+      color: rgba(255,255,255,0.45);
+      letter-spacing: 0.5px;
+      text-transform: uppercase;
+      margin-bottom: 3px;
+    }
+
+    .stat-value {
+      font-size: 15px;
+      font-weight: 600;
+      color: #fff;
+      font-variant-numeric: tabular-nums;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .stat-value.highlight { color: #4ade80; }
+    .stat-value.warn { color: #fb923c; }
+
+    #btn-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+    }
+
+    .btn {
+      padding: 12px 10px;
+      border-radius: 10px;
+      border: none;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      transition: opacity 0.15s, transform 0.1s;
+    }
+
+    .btn:active { transform: scale(0.97); opacity: 0.85; }
+
+    #btn-locate {
+      background: #4ade80;
+      color: #0f2818;
+    }
+
+    #btn-locate.tracking {
+      background: #fb923c;
+      color: #2d1100;
+    }
+
+    #btn-center {
+      background: rgba(255,255,255,0.1);
+      color: #fff;
+      border: 0.5px solid rgba(255,255,255,0.2);
+    }
+
+    #status-bar {
+      font-size: 12px;
+      color: rgba(255,255,255,0.4);
+      text-align: center;
+    }
+
+    #status-bar span { color: #4ade80; }
+
+    /* Marcador personalizado */
+    .user-marker-wrap {
+      position: relative;
+      width: 36px;
+      height: 36px;
+    }
+
+    .user-pulse {
+      position: absolute;
+      inset: 0;
+      border-radius: 50%;
+      background: rgba(74,222,128,0.25);
+      animation: pulse 2s ease-out infinite;
+    }
+
+    .user-dot {
+      position: absolute;
+      inset: 8px;
+      border-radius: 50%;
+      background: #4ade80;
+      border: 2.5px solid #fff;
+      box-shadow: 0 0 0 2px #4ade80;
+    }
+
+    /* Flecha de dirección encima del punto */
+    .user-arrow {
+      position: absolute;
+      top: -10px;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 0;
+      height: 0;
+      border-left: 6px solid transparent;
+      border-right: 6px solid transparent;
+      border-bottom: 10px solid #4ade80;
+      transition: opacity 0.3s;
+      opacity: 0;
+    }
+
+    @keyframes pulse {
+      0%   { transform: scale(1);   opacity: 0.7; }
+      70%  { transform: scale(2.5); opacity: 0; }
+      100% { transform: scale(1);   opacity: 0; }
+    }
+
+    /* Leaflet overrides */
+    .leaflet-control-zoom { display: none; }
+
+    .leaflet-tile-pane { filter: brightness(0.92) saturate(1.1); }
+  </style>
+</head>
+<body>
+
+<div id="map"></div>
+
+<div id="panel">
+  <div id="coords-row">
+    <div class="stat-card">
+      <div class="stat-label">Latitud</div>
+      <div class="stat-value" id="val-lat">—</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Longitud</div>
+      <div class="stat-value" id="val-lng">—</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Precisión</div>
+      <div class="stat-value" id="val-acc">—</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Dirección</div>
+      <div class="stat-value" id="val-heading">—</div>
+    </div>
+  </div>
+
+  <div  id="btn-row">
+    <button class="btn" id="btn-locate" onclick="toggleTracking()">
+        <i class="bi bi-geo-alt"></i> Iniciar GPS
+    </button>
+    <button class="btn" id="btn-center" onclick="centerMap()" disabled>
+       <i class="bi bi-arrow-repeat"></i> Centrar mapa
+    </button>
+  </div>
+
+  <div id="status-bar">Presiona <span>Iniciar GPS</span> para comenzar</div>
+</div>
+
+<script>
+  const map = L.map('map', {
+    zoomControl: false,
+    attributionControl: false
+  }).setView([16.75, -93.1], 14);
+
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 20
+  }).addTo(map);
+
+  const markerHTML = `
+    <div class="user-marker-wrap">
+      <div class="user-pulse"></div>
+      <div class="user-dot"></div>
+      <div class="user-arrow" id="arrow-el"></div>
+    </div>`;
+
+  const userIcon = L.divIcon({
+    html: markerHTML,
+    className: '',
+    iconSize: [36, 36],
+    iconAnchor: [18, 18]
+  });
+
+  let marker = null;
+  let accuracyCircle = null;
+  let watchId = null;
+  let tracking = false;
+  let followMap = true;
+  let lastPos = null;
+  let arrowEl = null;
+
+  // Suavizado: interpolación lineal animada
+  function animateMarker(fromLatLng, toLatLng, dur = 600) {
+    const start = performance.now();
+    const fr = fromLatLng.lat, fo = fromLatLng.lng;
+    const tr = toLatLng.lat, to = toLatLng.lng;
+
+    function step(now) {
+      let t = Math.min((now - start) / dur, 1);
+      // ease in-out cúbico
+      t = t < 0.5 ? 4*t*t*t : 1 - Math.pow(-2*t+2,3)/2;
+      marker.setLatLng([fr + (tr-fr)*t, fo + (to-fo)*t]);
+      if (t < 1) requestAnimationFrame(step);
+    }
+    requestAnimationFrame(step);
+  }
+
+  function animateCircle(fromRadius, toRadius, fromLatLng, toLatLng, dur = 600) {
+    const start = performance.now();
+    function step(now) {
+      let t = Math.min((now - start) / dur, 1);
+      t = t < 0.5 ? 4*t*t*t : 1 - Math.pow(-2*t+2,3)/2;
+      const r = fromRadius + (toRadius - fromRadius) * t;
+      const lat = fromLatLng.lat + (toLatLng.lat - fromLatLng.lat) * t;
+      const lng = fromLatLng.lng + (toLatLng.lng - fromLatLng.lng) * t;
+      accuracyCircle.setLatLng([lat, lng]);
+      accuracyCircle.setRadius(r);
+      if (t < 1) requestAnimationFrame(step);
+    }
+    requestAnimationFrame(step);
+  }
+
+  function onPosition(pos) {
+    const { latitude: lat, longitude: lng, accuracy, heading } = pos.coords;
+    const newLatLng = L.latLng(lat, lng);
+
+    // Actualizar UI
+    document.getElementById('val-lat').textContent = lat.toFixed(6);
+    document.getElementById('val-lng').textContent = lng.toFixed(6);
+    document.getElementById('val-acc').textContent =
+      accuracy < 10 ? `${Math.round(accuracy)} m` :
+      accuracy < 30 ? `~${Math.round(accuracy)} m` :
+      `±${Math.round(accuracy)} m`;
+    document.getElementById('val-acc').className =
+      'stat-value ' + (accuracy < 15 ? 'highlight' : accuracy < 40 ? '' : 'warn');
+
+    if (heading !== null && heading !== undefined && !isNaN(heading)) {
+      document.getElementById('val-heading').textContent =
+        `${Math.round(heading)}° ${headingLabel(heading)}`;
+      if (arrowEl) {
+        arrowEl.style.opacity = '1';
+        arrowEl.style.transform = `translateX(-50%) rotate(${heading}deg) translateY(-6px)`;
+      }
+    } else {
+      document.getElementById('val-heading').textContent = 'N/D';
+    }
+
+    if (!marker) {
+      marker = L.marker(newLatLng, { icon: userIcon }).addTo(map);
+      accuracyCircle = L.circle(newLatLng, {
+        radius: accuracy,
+        color: '#4ade80',
+        fillColor: '#4ade80',
+        fillOpacity: 0.08,
+        weight: 1.5,
+        dashArray: '4 4'
+      }).addTo(map);
+      map.setView(newLatLng, 17);
+      arrowEl = document.querySelector('.user-arrow');
+      document.getElementById('btn-center').disabled = false;
+    } else {
+      const prevLatLng = marker.getLatLng();
+      const prevRadius = accuracyCircle.getRadius();
+      animateMarker(prevLatLng, newLatLng);
+      animateCircle(prevRadius, accuracy, prevLatLng, newLatLng);
+      if (followMap) map.panTo(newLatLng, { animate: true, duration: 0.5 });
+    }
+
+    lastPos = newLatLng;
+
+    const updates = document.querySelector('#status-bar');
+    const t = new Date();
+    updates.innerHTML = `Última actualización: <span>${t.toLocaleTimeString()}</span>`;
+  }
+
+  function onError(err) {
+    const msgs = {
+      1: 'Permiso denegado — activa el GPS en tu navegador',
+      2: 'GPS no disponible en este momento',
+      3: 'Tiempo de espera agotado'
+    };
+    document.getElementById('status-bar').innerHTML =
+      `⚠️ ${msgs[err.code] || 'Error desconocido'}`;
+    stopTracking();
+  }
+
+  function startTracking() {
+    if (!navigator.geolocation) {
+      document.getElementById('status-bar').textContent =
+        'Tu navegador no soporta geolocalización';
+      return;
+    }
+    tracking = true;
+    followMap = true;
+    const btn = document.getElementById('btn-locate');
+    btn.textContent = '⏹ Detener GPS';
+    btn.classList.add('tracking');
+    document.getElementById('status-bar').innerHTML =
+      '<span>Buscando señal GPS...</span>';
+
+    watchId = navigator.geolocation.watchPosition(onPosition, onError, {
+      enableHighAccuracy: true,
+      maximumAge: 0,
+      timeout: 10000
+    });
+
+    // Dejar de seguir si el usuario mueve el mapa manualmente
+    map.on('dragstart', () => { followMap = false; });
+  }
+
+  function stopTracking() {
+    tracking = false;
+    if (watchId !== null) {
+      navigator.geolocation.clearWatch(watchId);
+      watchId = null;
+    }
+    const btn = document.getElementById('btn-locate');
+    btn.textContent = '📍 Iniciar GPS';
+    btn.classList.remove('tracking');
+  }
+
+  function toggleTracking() {
+    if (tracking) stopTracking();
+    else startTracking();
+  }
+
+  function centerMap() {
+    if (lastPos) {
+      followMap = true;
+      map.flyTo(lastPos, 17, { animate: true, duration: 0.8 });
+    }
+  }
+
+  function headingLabel(deg) {
+    const dirs = ['N','NE','E','SE','S','SO','O','NO'];
+    return dirs[Math.round(deg / 45) % 8];
+  }
+</script>
+</body>
+</html>
